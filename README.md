@@ -30,29 +30,6 @@ The overview is organized as three horizontal lanes that separate **who does the
 
 **Confidential communication design (bottom).** Document processing, retrieval, and execution run on a **confidential CPU** (Intel TDX); model inference runs on a **confidential GPU** (NVIDIA H100). Both obtain keys from a **KMS** after attestation and communicate over a protected CPU–GPU channel. This part is a proposed deployment design, not yet validated on hardware.
 
-The detailed data flow, including the validation and rejection loops:
-
-```mermaid
-flowchart LR
-    subgraph Offline["Offline: Wiki construction"]
-        D[Documents] --> A[Source archive<br/>SHA256 content hash]
-        A --> G[LLM proposes facts,<br/>sources, links]
-        G --> V{Execution layer<br/>validates}
-        V -- feedback --> G
-        V -- valid --> W[Linked knowledge pages<br/>incremental, source-cited]
-        W --> S[Overlapping page groups<br/>+ navigation summaries]
-        S --> I[Hybrid index<br/>BM25 + dense, RRF]
-    end
-    subgraph Online["Online: Question answering"]
-        Q[Question] --> AG[Single QA agent<br/>evidence requirements]
-        AG -- search / read --> I
-        AG -- read --> W
-        AG -- claims + evidence IDs --> C{Citation &<br/>coverage check}
-        C -- rejected --> AG
-        C -- accepted --> ANS[Answer with citations<br/>or unknown]
-    end
-```
-
 Documents are organized in three layers:
 
 | Layer | Role | Used as answer evidence? |

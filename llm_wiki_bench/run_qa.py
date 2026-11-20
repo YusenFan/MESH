@@ -1,0 +1,267 @@
+"""End-to-end QA runner over a compiled LLM-Wiki.
+
+For each QA pair this script
+
+  1. invokes one Wiki agent to retrieve, track evidence gaps, and submit an answer,
+  2. validates submitted citations against article passages actually read,
+  3. writes a JSONL prediction file, and (optionally) runs evaluation.
+
+Usage:
+
+    python -m llm_wiki_bench.run_qa --dataset hotpotqa --limit 5
+    python -m llm_wiki_bench.run_qa --dataset hotpotqa --limit 500 --evaluate
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import sys
+import time
+from pathlib import Path
+
+# Make sibling modules importable when launched as `python release/.../run_qa.py`
+_BENCH_DIR = Path(__file__).parent
+if str(_BENCH_DIR) not in sys.path:
+    sys.path.append(str(_BENCH_DIR))
+
+import bench_config as config                        # noqa: E402
+from benchmark_metrics import add_run_metrics        # noqa: E402
+import evaluate as _evaluate                         # noqa: E402
+from llm_client import call_llm_with_tools  # noqa: E402
+from qa_run_state import compact_predictions, select_pending  # noqa: E402
+from qa_contract import validate_answer               # noqa: E402
+from wiki_agent import WikiAgent                     # noqa: E402
+from wiki_retriever import WikiRetriever             # noqa: E402
+
+
+# ─── Main ─────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Run Retrieval-as-Reasoning QA over a compiled LLM-Wiki."
+    )
+    parser.add_argument("--wiki-dir", type=Path, help="Read an independently rebuilt wiki.")
+    parser.add_argument("--dataset", "-d", required=True,
+                        choices=["hotpotqa", "musique", "2wikimhqa"])
+    parser.add_argument("--limit", "-n", type=int, default=None,
+                        help="Process only the first N QA pairs.")
+    parser.add_argument("--t-max", type=int, default=15,
+                        help="Total tool-call budget, including state updates and answer submission (default 15).")
+    parser.add_argument("--retrieval-model", default=None,
+                        help="Model for the unified retrieval and answer agent (default: LLM_PREMIUM_MODEL).")
+    parser.add_argument("--answer-model", default=None,
+                        help="Deprecated alias for --retrieval-model; the unified loop uses one model.")
+    parser.add_argument("--summary-mode", choices=["hybrid", "bm25", "dense", "tree"], default="hybrid",
+                        help="Initial summary retrieval method (default hybrid); tree is the navigation baseline.")
+    parser.add_argument("--summary-limit", type=int, default=5, help="Configured summary batch limit, 1-10 (default 5); adaptive retrieval can adjust it.")
+    parser.add_argument("--summary-candidates", type=int, default=20,
+                        help="Candidates per retriever before RRF (default 20).")
+    parser.add_argument("--summary-token-budget", type=int, default=4000,
+                        help="Max serialized summary tokens, 512-16000 (default 4000); baseline also uses it for reads unless --read-token-budget is set.")
+    parser.add_argument("--embedding-model", default=None,
+                        help="Embedding model; defaults to EMBEDDING_MODEL or text-embedding-3-large.")
+    parser.add_argument("--qa-profile", choices=["baseline", "latency"], default=None,
+                        help="Default latency for 2Wiki/HotpotQA; baseline preserves the original navigation loop.")
+    parser.add_argument("--prefetch-pages", type=int, default=None,
+                        help="Pages automatically read before the first model turn, 0-10; latency default 2.")
+    parser.add_argument("--read-token-budget", type=int, default=None,
+                        help="Independent wiki_read budget, 512-16000; latency default 4000.")
+    parser.add_argument("--adaptive-retrieval", action=argparse.BooleanOptionalAction, default=None,
+                        help="Adjust summary limits and exclude seen candidates; latency default enabled.")
+    parser.add_argument("--prepare-index", action=argparse.BooleanOptionalAction, default=None,
+                        help="Prepare/load document vectors before timing questions; latency default enabled.")
+    parser.add_argument("--question-time-budget", type=float, default=None,
+                        help="Cooperative time budget shared by a question's requests/retries; 0 disables. Latency default 120s.")
+    parser.add_argument("--output", "-o", default=None,
+                        help="Predictions output path (default: results/<dataset>/predictions.jsonl).")
+    parser.add_argument("--resume", action="store_true",
+                        help="Keep successful records and rerun missing or failed questions.")
+    parser.add_argument("--evaluate", action="store_true",
+                        help="Run evaluation immediately after prediction.")
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args()
+    profile = args.qa_profile or ("latency" if args.dataset in {"hotpotqa", "2wikimhqa"} else "baseline")
+    latency = profile == "latency"
+    prefetch_pages = args.prefetch_pages if args.prefetch_pages is not None else (2 if latency and args.summary_mode != "tree" else 0)
+    read_token_budget = args.read_token_budget if args.read_token_budget is not None else (4000 if latency else None)
+    adaptive = args.adaptive_retrieval if args.adaptive_retrieval is not None else latency and args.summary_mode != "tree"
+    prepare_index = args.prepare_index if args.prepare_index is not None else latency
+    time_budget = args.question_time_budget if args.question_time_budget is not None else (120.0 if latency else 0.0)
+
+    if args.t_max < 1:
+        parser.error("t-max must be positive")
+    if not 1 <= args.summary_limit <= 10 or not args.summary_limit <= args.summary_candidates <= 200:
+        parser.error("summary-limit must be 1-10 and summary-candidates must be between summary-limit and 200")
+    if not 512 <= args.summary_token_budget <= 16000:
+        parser.error("summary-token-budget must be 512-16000")
+    if not 0 <= prefetch_pages <= 10:
+        parser.error("prefetch-pages must be 0-10")
+    if read_token_budget is not None and not 512 <= read_token_budget <= 16000:
+        parser.error("read-token-budget must be 512-16000")
+    if not math.isfinite(time_budget) or time_budget < 0:
+        parser.error("question-time-budget must be finite and nonnegative")
+    if args.answer_model and args.retrieval_model and args.answer_model != args.retrieval_model:
+        parser.error("the unified agent uses one model; choose --retrieval-model only")
+
+    # 1. Locate the compiled Wiki for this dataset.
+    config.set_dataset(args.dataset, wiki_dir=args.wiki_dir)
+    config.ensure_wiki_dirs()
+    wiki_dir = Path(config.WIKI_DIR)
+    if not wiki_dir.exists():
+        sys.exit(f"❌ Compiled wiki not found: {wiki_dir}\n"
+                 f"   Build it first: python -m llm_wiki_bench.run --dataset {args.dataset}")
+
+    # 2. Load QA pairs.
+    qa_path = Path(config.BASE_DIR) / "data" / args.dataset / "qa_pairs.jsonl"
+    if not qa_path.exists():
+        sys.exit(f"❌ QA pairs not found: {qa_path}\n"
+                 f"   Run: python -m llm_wiki_bench.run --dataset {args.dataset} --only-preprocess")
+    with open(qa_path, encoding="utf-8") as f:
+        qa_pairs = [json.loads(line) for line in f if line.strip()]
+    if args.limit:
+        qa_pairs = qa_pairs[: args.limit]
+
+    print(f"Wiki dir : {wiki_dir}")
+    print(f"QA pairs : {len(qa_pairs)}")
+    print(f"T_max={args.t_max}  summary_mode={args.summary_mode}  "
+          f"summary_limit={args.summary_limit}  navigation_token_budget={args.summary_token_budget}")
+
+    # 3. Initialize retriever + agent.
+    startup_started = time.monotonic()
+    retrieval_model = args.retrieval_model or args.answer_model or getattr(config, "LLM_PREMIUM_MODEL", None) or config.LLM_MODEL
+    retriever = WikiRetriever(wiki_dir, summary_mode=args.summary_mode, summary_limit=args.summary_limit,
+                              summary_candidates=args.summary_candidates,
+                              summary_token_budget=args.summary_token_budget,
+                              embedding_model=args.embedding_model, tokenizer_model=retrieval_model,
+                              read_token_budget=read_token_budget, evidence_tools=bool(prefetch_pages or adaptive))
+    retriever.load()
+    print(f"Loaded   : {len(retriever.pages)} pages, {len(retriever.dir_indexes)} directory indices")
+    if not any(page.layer in {"knowledge", "articles"} for page in retriever.pages.values()):
+        parser.error("this wiki has no knowledge pages or article evidence; rebuild using --wiki-dir")
+    index_report = {"status": "deferred", "mode": args.summary_mode}
+    if prepare_index:
+        before_index_usage = dict(retriever.embedder.stats)
+        try:
+            index_report = retriever.prepare_index()
+        except (ValueError, RuntimeError, OSError) as exc:
+            if args.summary_mode == "dense":
+                parser.error(f"dense index preparation failed: {exc}")
+            index_report = {"status": "unavailable", "mode": args.summary_mode, "error": str(exc),
+                            "embedding_usage": {key: value - before_index_usage.get(key, 0)
+                                                for key, value in retriever.embedder.stats.items()}}
+            print(f"Index preparation unavailable; hybrid will report its BM25 fallback: {exc}")
+    startup_seconds = time.monotonic() - startup_started
+    print(f"QA profile: {profile}; prefetch={prefetch_pages}; adaptive={adaptive}; time_budget={time_budget}s")
+    print(f"Index     : {index_report['status']} ({startup_seconds:.1f}s startup)")
+
+    agent = WikiAgent(
+        retriever,
+        call_llm_with_tools=call_llm_with_tools,
+        model=retrieval_model,
+        t_max=args.t_max,
+        verbose=args.verbose,
+        prefetch_pages=prefetch_pages,
+        adaptive_retrieval=adaptive,
+        question_time_budget=time_budget or None,
+    )
+
+    # 4. Run.
+    out_path = Path(args.output) if args.output else (
+        Path(config.BASE_DIR) / "results" / args.dataset / "predictions.jsonl"
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    pending_qa = select_pending(qa_pairs, out_path, args.resume)
+    if args.resume:
+        print(f"Resume    : {len(pending_qa)} pending/failed of {len(qa_pairs)} requested questions")
+
+    t0 = time.time()
+    mode = "a" if args.resume and out_path.exists() else "w"
+    with open(out_path, mode, encoding="utf-8") as fout:
+        for i, qa in enumerate(pending_qa, 1):
+            question_started = time.time()
+            question = qa["question"]
+            rr = None
+            error = None
+            try:
+                rr = agent.retrieve(question)
+                answer = rr.answer
+            except (ValueError, RuntimeError, OSError) as exc:
+                print(f"  [{i}/{len(pending_qa)}] ❌ {qa['id']}: {exc}")
+                error = str(exc)
+                answer = {"prediction": "unknown", "evidence_chain": [], "evidence_status": "error"}
+
+            record = {
+                "id": qa["id"],
+                "question": question,
+                **answer,
+                "gold_answer": qa.get("answer", ""),
+                "retrieved_titles": [name for _, name in (rr.pages if rr else [])],
+                "retrieval_trace": rr.trace if rr else [],
+                "retrieval_steps": rr.total_calls if rr else 0,
+                "article_evidence": rr.evidence if rr else [],
+                "knowledge_evidence": rr.page_evidence if rr else [],
+                "evidence_snapshots": rr.evidence_registry if rr else {},
+                "retrieval_llm_calls": rr.llm_calls if rr else 0,
+                "retrieval_usage_by_model": rr.usage_by_model if rr else {},
+                "evidence_requirements": rr.requirements if rr else [],
+                "evidence_gaps": [item for item in rr.requirements if item["status"] == "unresolved"] if rr else [],
+                "stop_reason": rr.stop_reason if rr else "error",
+                "tool_calls": rr.tool_calls if rr else [],
+                "initial_navigation": rr.initial_navigation if rr else {},
+                "summary_searches": rr.summary_searches if rr else [],
+                "embedding_usage": rr.embedding_usage if rr else {},
+                "timings": rr.timings if rr else {},
+                "llm_turns": rr.llm_turns if rr else [],
+                "network_stats": rr.network_stats if rr else {},
+                "navigation_progress": rr.navigation_progress if rr else [],
+                "elapsed_seconds": round(time.time() - question_started, 3),
+                "retrieval_config": {"summary_mode": args.summary_mode, "summary_limit": args.summary_limit,
+                                     "summary_candidates": args.summary_candidates,
+                                     "summary_token_budget": args.summary_token_budget,
+                                     "read_token_budget": retriever.read_token_budget,
+                                     "qa_profile": profile, "prefetch_pages": prefetch_pages,
+                                     "adaptive_retrieval": adaptive, "question_time_budget": time_budget,
+                                     "tokenizer": retriever.tokenizer.name},
+                "error": error or (rr.error if rr else None),
+            }
+            fout.write(json.dumps(record, ensure_ascii=False) + "\n")
+            fout.flush()
+
+            if i % 10 == 0 or i == len(pending_qa) or args.verbose:
+                elapsed = time.time() - t0
+                print(f"  [{i}/{len(pending_qa)}] {qa['id']}  steps={record['retrieval_steps']}  "
+                      f"pages={len(record['retrieved_titles'])}  ({elapsed:.1f}s)")
+
+    run_state = compact_predictions(out_path, qa_pairs)
+    run_metadata = {"dataset": args.dataset, "qa_profile": profile, "index_preparation": index_report,
+                    "startup_seconds": startup_seconds, "qa_wall_seconds": time.time() - t0,
+                    "questions_run": len(pending_qa), "completion": run_state}
+    out_path.with_suffix(".run.json").write_text(json.dumps(run_metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"\nPredictions saved: {out_path}")
+    print(f"Total time       : {time.time() - t0:.1f}s")
+    print(f"Completion       : {run_state['written']}/{run_state['requested']} records; "
+          f"missing={len(run_state['missing_ids'])} failed={len(run_state['failed_ids'])}")
+
+    # 5. Optional evaluation.
+    if args.evaluate:
+        predictions = _evaluate._load_predictions(out_path)
+        summary, details = _evaluate.evaluate(qa_pairs, predictions)
+        if summary:
+            add_run_metrics(summary, wiki_dir, predictions, run_metadata=run_metadata)
+            _evaluate._print_summary(summary, args.dataset)
+            results_dir = out_path.parent
+            results_dir.mkdir(parents=True, exist_ok=True)
+            with open(results_dir / f"{args.dataset}_summary.json", "w", encoding="utf-8") as f:
+                json.dump(summary, f, indent=2, ensure_ascii=False)
+            with open(results_dir / f"{args.dataset}_details.jsonl", "w", encoding="utf-8") as f:
+                for d in details:
+                    f.write(json.dumps(d, ensure_ascii=False) + "\n")
+
+    if run_state["missing_ids"] or run_state["failed_ids"]:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

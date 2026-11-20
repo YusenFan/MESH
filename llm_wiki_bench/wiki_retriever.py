@@ -1,0 +1,582 @@
+"""Retrieve current summaries, navigate files, and read exact article evidence."""
+
+from __future__ import annotations
+
+import json
+import hashlib
+import logging
+import re
+import time
+from dataclasses import dataclass, field
+from pathlib import Path, PurePosixPath
+
+from build_summaries import current_summaries
+from embedding_client import EmbeddingClient
+from evidence_snapshots import decorate_article, decorate_page, page_units
+from summary_retrieval import SummaryIndex, terms
+from token_budget import TokenBudget, dumps
+from wiki_documents import ARTICLE_PREFIX, parse_document, read_article, resolve_wiki_link, wiki_path
+from request_budget import remaining_seconds
+
+_logger = logging.getLogger("llm_wiki.retriever")
+
+
+# ─── Data structures ──────────────────────────────────────────────────────
+
+@dataclass
+class WikiPage:
+    """A single compiled Wiki page."""
+    name: str                                        # readable title (filename is a fallback)
+    dir_name: str                                    # directory under wiki/
+    rel_path: str                                    # e.g. "entities/Einstein.md"
+    text: str                                        # full markdown (with frontmatter)
+    body: str                                        # markdown without frontmatter
+    aliases: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+    description: str = ""                            # one-line "> ..." blockquote
+    links_to: list[str] = field(default_factory=list)  # [[wikilink]] targets
+
+    @property
+    def layer(self) -> str:
+        if self.rel_path.startswith(ARTICLE_PREFIX):
+            return "articles"
+        return "summaries" if self.dir_name == "summaries" else "knowledge"
+
+
+# ─── Retriever ────────────────────────────────────────────────────────────
+
+class WikiRetriever:
+    """Expose directory traversal and explicit page/article reads."""
+
+    def __init__(self, wiki_dir: Path, *, summary_mode: str = "hybrid", summary_limit: int = 5,
+                 summary_token_budget: int = 4000, summary_candidates: int = 20,
+                 embedding_model: str | None = None, tokenizer_model: str = "gpt-4o", embedder=None,
+                 read_token_budget: int | None = None, evidence_tools: bool = False):
+        if summary_mode not in {"tree", "bm25", "dense", "hybrid"}:
+            raise ValueError("summary mode must be tree, bm25, dense or hybrid")
+        if type(summary_limit) is not int or not 1 <= summary_limit <= 10:
+            raise ValueError("summary limit must be 1-10")
+        if type(summary_token_budget) is not int or not 512 <= summary_token_budget <= 16000:
+            raise ValueError("summary token budget must be 512-16000")
+        if type(summary_candidates) is not int or not summary_limit <= summary_candidates <= 200:
+            raise ValueError("summary candidates must be between summary limit and 200")
+        self.wiki_dir = Path(wiki_dir)
+        self.summary_mode = summary_mode
+        self.summary_limit = summary_limit
+        self.summary_token_budget = summary_token_budget
+        if read_token_budget is not None and (type(read_token_budget) is not int or not 512 <= read_token_budget <= 16000):
+            raise ValueError("read token budget must be 512-16000")
+        self._read_token_budget = read_token_budget
+        self.evidence_tools = evidence_tools
+        self.summary_candidates = summary_candidates
+        self.tokenizer = TokenBudget(tokenizer_model)
+        self.embedder = embedder if embedder is not None else EmbeddingClient(
+            self.wiki_dir / ".build" / "retrieval-embeddings.sqlite3", model=embedding_model)
+        self.summary_index = None
+        self.pages: dict[str, WikiPage] = {}
+        self.dir_indexes: dict[str, str] = {}        # dir_name → _index.md content
+        self._loaded = False
+        self._name_paths = {}
+
+    @property
+    def read_token_budget(self) -> int:
+        return self._read_token_budget if self._read_token_budget is not None else self.summary_token_budget
+
+    # ── loading ───────────────────────────────────────────────────────────
+
+    def load(self) -> None:
+        """Walk the wiki directory and build all indices (idempotent)."""
+        if self._loaded:
+            return
+        if not self.wiki_dir.exists():
+            _logger.warning("wiki dir does not exist: %s", self.wiki_dir)
+            self._loaded = True
+            return
+
+        summaries = current_summaries(self.wiki_dir)
+        for md in sorted(self.wiki_dir.rglob("*.md")):
+            rel = md.relative_to(self.wiki_dir)
+            rel_str = str(rel)
+
+            if any(part.startswith(".") for part in rel.parts):
+                continue
+            if ((rel.parts[0] == "sources" and not rel_str.startswith(ARTICLE_PREFIX))
+                    or rel_str.startswith("syntheses/")):
+                continue
+            if rel_str.startswith("summaries/"):
+                if md.name == "_index.md":
+                    self.dir_indexes["summaries"] = "# Summaries\n" + "\n".join(
+                        f"- [[{p[:-3]}]]" for p in sorted(summaries))
+                    continue
+                if rel_str not in summaries:
+                    continue
+
+            if md.name in ("index.md", "overview.md", "log.md"):
+                continue
+
+            if md.name == "_index.md":
+                dir_name = str(rel.parent) if str(rel.parent) != "." else ""
+                if dir_name:
+                    try:
+                        self.dir_indexes[dir_name] = md.read_text(encoding="utf-8")
+                    except (OSError, UnicodeDecodeError):
+                        pass
+                continue
+
+            try:
+                wiki_path(self.wiki_dir, rel_str)
+                text = md.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+
+            page = self._parse_page(md.stem, rel, text)
+            self.pages[rel_str] = page
+            if page.layer == "knowledge":
+                for name in [page.name, *page.aliases]:
+                    normalized = " ".join(terms(name))
+                    if len(normalized) >= 3:
+                        self._name_paths.setdefault(normalized, set()).add(rel_str)
+
+        self._loaded = True
+        _logger.info(
+            "loaded wiki: %d pages, %d directory indices",
+            len(self.pages), len(self.dir_indexes),
+        )
+
+    def _get_summary_index(self) -> SummaryIndex:
+        self.load()
+        if self.summary_index is None:
+            self.summary_index = SummaryIndex(self.pages, mode=self.summary_mode,
+                                              candidate_k=self.summary_candidates, embedder=self.embedder,
+                                              cache_dir=self.wiki_dir / ".build")
+        return self.summary_index
+
+    def prepare_index(self) -> dict:
+        started = time.monotonic()
+        if self.summary_mode == "tree":
+            return {"status": "disabled", "mode": "tree"}
+        before = dict(getattr(self.embedder, "stats", {}))
+        report = self._get_summary_index().prepare_index()
+        return {**report, "elapsed_seconds": time.monotonic() - started,
+                "mode": self.summary_mode, "embedding_usage": {
+            key: value - before.get(key, 0) for key, value in getattr(self.embedder, "stats", {}).items()}}
+
+    def lookup_pages(self, query: str, exclude_paths: list[str] | None = None) -> list[dict]:
+        """Find unambiguous whole titles/aliases in the query; this is navigation, not evidence."""
+        self.load()
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("query must be nonempty")
+        if self.tokenizer.count(query) > 512:
+            raise ValueError("query must be at most 512 tokens")
+        normalized = " " + " ".join(terms(query)) + " "
+        excluded, seen, matches, occupied = set(exclude_paths or []), set(), [], []
+        for name, paths in sorted(self._name_paths.items(), key=lambda pair: (-len(pair[0]), pair[0])):
+            spans = [match.span() for match in re.finditer(r"(?<!\S)" + re.escape(name) + r"(?!\S)", normalized)]
+            spans = [(left, right) for left, right in spans
+                     if not any(left < end and right > start for start, end in occupied)]
+            if not spans:
+                continue
+            occupied.extend(spans)
+            if len(paths) != 1:
+                continue
+            path = next(iter(paths))
+            if path not in excluded and path not in seen:
+                matches.append({"path": path, "title": self.pages[path].name, "matched_name": name})
+                seen.add(path)
+        return matches
+
+    def summary_search(self, query: str, limit: int | None = None, offset: int = 0,
+                       exclude_paths: list[str] | None = None, token_budget: int | None = None) -> dict:
+        """Return a token-bounded batch; agent may reformulate, page or exclude seen summaries."""
+        self.load()
+        if self.summary_mode == "tree":
+            raise ValueError("Summary retrieval is disabled in tree mode; use wiki_tree")
+        return self._get_summary_index().search(query, tokenizer=self.tokenizer,
+                                         limit=self.summary_limit if limit is None else limit,
+                                         token_budget=self.summary_token_budget if token_budget is None else min(self.summary_token_budget, token_budget), offset=offset,
+                                         exclude_paths=exclude_paths)
+
+    def initial_navigation(self, question: str, *, prefer_titles: bool = False,
+                           limit: int | None = None, token_budget: int | None = None) -> dict:
+        if self.summary_mode == "tree":
+            return {"mode": "tree", "directory_tree": self.wiki_map()}
+        matches = self.lookup_pages(question) if prefer_titles else []
+        if matches:
+            return {"mode": "title_lookup", "effective_mode": "title_lookup", "query": question,
+                    "matches": matches[:10], "navigation_only": True,
+                    "hint": "Matched titles are navigation. Read these pages for evidence; use summary_search for missing entities or hops."}
+        return self.summary_search(question, limit=limit, token_budget=token_budget)
+
+    def select_read_paths(self, query: str, navigation: dict, limit: int,
+                          exclude_paths: list[str] | None = None) -> list[str]:
+        excluded, candidates = set(exclude_paths or []), {}
+        for match in self.lookup_pages(query, list(excluded)):
+            candidates[match["path"]] = (-1, -len(match["matched_name"]))
+        query_terms = set(terms(query))
+        for row in navigation.get("results", []):
+            for member in row.get("members", []):
+                path = member["path"]
+                page = self.pages.get(path)
+                if path not in excluded and page is not None and page.layer == "knowledge":
+                    priority = (row.get("rank", 1), -len(query_terms & set(terms(page.name))))
+                    candidates.setdefault(path, priority)
+        return sorted(candidates, key=lambda path: (candidates[path], path))[:limit]
+
+    def retrieve_evidence(self, query: str, *, max_pages: int = 2, exclude_paths: list[str] | None = None,
+                          exclude_summaries: list[str] | None = None, limit: int | None = None,
+                          token_budget: int | None = None, max_operations: int = 2) -> dict:
+        if type(max_pages) is not int or not 1 <= max_pages <= 10:
+            raise ValueError("max_pages must be 1-10")
+        if max_operations not in {1, 2}:
+            raise ValueError("max_operations must be 1 or 2")
+        for paths in (exclude_paths, exclude_summaries):
+            if paths is not None and (not isinstance(paths, list) or any(not isinstance(p, str) for p in paths)):
+                raise ValueError("exclusions must be lists of paths")
+        matches = self.lookup_pages(query, exclude_paths)
+        navigation = ({"mode": "title_lookup", "effective_mode": "title_lookup", "query": query,
+                       "matches": matches[:10], "navigation_only": True} if matches else
+                      self.summary_search(query, limit=limit, exclude_paths=exclude_summaries, token_budget=token_budget))
+        paths = self.select_read_paths(query, navigation, max_pages, exclude_paths) if max_operations == 2 else []
+        remaining_seconds()
+        error = None
+        try:
+            reads = self.read(paths) if paths else []
+        except (ValueError, TypeError, OSError) as exc:
+            reads, error = [], str(exc)
+        payload = {"query": query, "navigation": navigation, "reads": reads,
+                "operation_cost": 2 if paths else 1,
+                "hint": "Cite only evidence IDs in reads. Check every entity and hop; use wiki_read to continue truncated pages or summary_search/wiki_tree for missing evidence."}
+        if error is not None:
+            payload["error"] = error
+        return payload
+
+    @property
+    def tool_schemas(self) -> list[dict]:
+        return [tool for tool in WIKI_TOOL_SCHEMAS
+                if ((self.summary_mode != "tree" or tool["function"]["name"] not in {"summary_search", "retrieve_evidence"})
+                    and (self.evidence_tools or tool["function"]["name"] != "retrieve_evidence"))]
+
+    def _parse_page(self, stem: str, rel: Path, text: str) -> WikiPage:
+        dir_name = str(rel.parent) if str(rel.parent) != "." else ""
+
+        metadata, body = parse_document(text)
+        aliases = metadata.get("aliases", [])
+        tags = metadata.get("tags", [])
+        aliases = [a for a in aliases if isinstance(a, str)] if isinstance(aliases, list) else []
+        tags = [t for t in tags if isinstance(t, str)] if isinstance(tags, list) else []
+        description = ""
+        heading = next((line[2:].strip() for line in body.splitlines() if line.startswith("# ")), "")
+        stem = str(metadata.get("title") or metadata.get("source_title") or heading or stem)
+        if re.fullmatch(r"[0-9a-f]{64}", stem):
+            stem = "Untitled page"
+
+        for line in body.strip().split("\n"):
+            line = line.strip()
+            if line.startswith("> ") and not line.startswith("> Source"):
+                description = line[2:].strip()
+                break
+
+        links_to = re.findall(r"\[\[(.+?)\]\]", body)
+
+        return WikiPage(
+            name=stem,
+            dir_name=dir_name,
+            rel_path=str(rel),
+            text=text,
+            body=body,
+            aliases=aliases,
+            tags=tags,
+            description=description,
+            links_to=links_to,
+        )
+
+    # ── directory tree ────────────────────────────────────────────────────
+
+    def tree(self, path: str = "/", depth: int = 2, offset: int = 0, limit: int = 100) -> dict:
+        """List QA-visible paths without ranking; directories can be expanded and paginated."""
+        self.load()
+        if not isinstance(path, str):
+            raise ValueError("path must be a wiki-relative directory")
+        path = path.strip()
+        if path == "/":
+            path = ""
+        if path and ("\\" in path or PurePosixPath(path).is_absolute()
+                     or ".." in PurePosixPath(path).parts or PurePosixPath(path).as_posix() != path):
+            raise ValueError("path must be a wiki-relative directory, or /")
+        if type(depth) is not int or not 1 <= depth <= 10:
+            raise ValueError("depth must be between 1 and 10")
+        if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 200:
+            raise ValueError("offset must be nonnegative and limit must be between 1 and 200")
+        entries = {}
+        for page in self.pages.values():
+            entries[page.rel_path] = {"path": page.rel_path, "type": "file", "title": page.name,
+                                     "layer": page.layer}
+        for directory in self.dir_indexes:
+            index_path = f"{directory}/_index.md"
+            entries[index_path] = {"path": index_path, "type": "file", "title": f"{directory} index",
+                                   "layer": "index"}
+        for file_path in list(entries):
+            for parent in PurePosixPath(file_path).parents:
+                if str(parent) != ".":
+                    entries.setdefault(str(parent), {"path": str(parent), "type": "directory"})
+        if path and (path not in entries or entries[path]["type"] != "directory"):
+            raise ValueError("directory not found; use wiki_tree('/') to list available paths")
+        prefix = path + "/" if path else ""
+        visible = [item for name, item in sorted(entries.items())
+                   if name.startswith(prefix) and name != path
+                   and len(name[len(prefix):].split("/")) <= depth]
+        selected = visible[offset:offset + limit]
+        next_offset = offset + len(selected)
+        return {"path": path or "/", "depth": depth, "entries": selected, "total": len(visible),
+                "next_offset": next_offset if next_offset < len(visible) else None}
+
+    # ── read ──────────────────────────────────────────────────────────────
+
+    def read(self, paths: list[str], offset: int = 0) -> list[dict]:
+        """Batch-read directory indices or page files.
+
+        * `"/"`            → list of available top-level directories
+        * `"entities"`     → directory `_index.md` (or page list)
+        * `"entities/X.md"` → full page text + metadata
+        """
+        remaining_seconds()
+        if not isinstance(paths, list) or not 1 <= len(paths) <= 10 or any(not isinstance(p, str) for p in paths):
+            raise ValueError("paths must contain 1-10 Wiki paths")
+        if type(offset) is not int or offset < 0 or (offset and len(paths) != 1):
+            raise ValueError("offset must be nonnegative; continue only one path at a time")
+        self.load()
+        out: list[dict] = []
+        for raw in paths:
+            p = resolve_wiki_link(raw, self.pages)
+            if p == "/":
+                out.append({"path": "/", "type": "root", "dirs": sorted(self.dir_indexes.keys())})
+                continue
+
+            if p.endswith("/_index.md"):
+                p = p[:-len("/_index.md")]
+            if p.endswith(".md"):
+                page = self.pages.get(p)
+                if page is None:
+                    out.append({"path": p, "type": "error", "error": "not found"})
+                    continue
+                if page.layer == "articles":
+                    out.append({"path": p, "type": "article", "name": page.name,
+                                "total_lines": len(page.text.splitlines()),
+                                "instruction": "Use source_read(article, start_line, end_line) for evidence."})
+                    continue
+                out.append({
+                    "path": p,
+                    "type": "file",
+                    "name": self.tokenizer.prefix(page.name, 80),
+                    "text": page.body,
+                    "meta": {
+                        "layer": page.layer,
+                    },
+                })
+                continue
+
+            # directory
+            idx = self.dir_indexes.get(p)
+            if idx:
+                out.append({"path": p, "type": "directory", "name": p, "text": idx})
+                continue
+
+            prefix = p + "/"
+            pages_in_dir = [pg.name for rel, pg in self.pages.items() if rel.startswith(prefix)]
+            if pages_in_dir:
+                out.append({"path": p, "type": "directory", "name": p, "text": "\n".join(pages_in_dir)})
+            else:
+                out.append({"path": p, "type": "error", "error": "not found"})
+        per_row = (self.read_token_budget - 64) // len(out) - 8
+        bounded = []
+        for item in out:
+            if "text" in item:
+                text = item["text"]
+                if offset > len(text):
+                    bounded.append({"path": item["path"], "error": "offset exceeds page length"})
+                    continue
+                item = {**item, "text": text[offset:], "start_offset": offset, "total_chars": len(text)}
+            decorate = None
+            if item.get('meta', {}).get('layer') == 'knowledge':
+                page = self.pages[item['path']]
+                units = page_units(page.body)
+                version = hashlib.sha256(page.text.encode('utf-8')).hexdigest()
+                decorate = lambda row, units=units, version=version: decorate_page(row, units, version)
+            bounded.append(self.tokenizer.fit_row(item, per_row, decorate=decorate))
+        if self.tokenizer.count(dumps(bounded)) > self.read_token_budget:
+            raise ValueError("Batch metadata exceeds read budget; request fewer paths")
+        return bounded
+
+    # ── helpers ───────────────────────────────────────────────────────────
+
+    def source_read(self, article: str, start_line: int = 1, end_line: int | None = None) -> dict:
+        """Read bounded article passages and retain the version observed by the agent."""
+        self.load()
+        article = resolve_wiki_link(article, self.pages)
+        if article not in self.pages or self.pages[article].layer != "articles":
+            raise ValueError(f"article not found: {article!r}; use a sources/articles/ path from "
+                             "a knowledge-page link or wiki_tree(path='sources/articles')")
+        if type(start_line) is not int:
+            raise ValueError("start_line must be an integer")
+        total = len(self.pages[article].text.splitlines())
+        if not 1 <= start_line <= total:
+            raise ValueError(f"start_line must be between 1 and {total}")
+        if end_line is None:
+            end_line = min(total, start_line + 79)
+        if type(end_line) is not int or end_line < start_line:
+            raise ValueError("end_line must be an integer at or after start_line")
+        if end_line - start_line >= 200:
+            raise ValueError("read at most 200 lines per call")
+        requested_end = end_line
+        end_line = min(end_line, total)
+        passage = read_article(self.wiki_dir, article, start_line, end_line)
+        if requested_end != end_line:
+            passage["requested_end_line"] = requested_end
+            passage["range_clamped"] = True
+        if end_line < total:
+            passage["next_start_line"] = end_line + 1
+        return passage
+
+    def wiki_map(self) -> str:
+        """Seed the agent with an unranked directory tree, with explicit expansion guidance."""
+        listing = self.tree(depth=2, limit=200)
+        lines = ["# Wiki directory tree", "Directory entries are navigation; read knowledge pages to obtain evidence.",
+                 "Use wiki_tree(path, depth, offset) to expand directories or continue a listing."]
+        for entry in listing["entries"]:
+            indent = "  " * (len(entry["path"].split("/")) - 1)
+            if entry["type"] == "directory":
+                lines.append(f"{indent}- {entry['path']}/")
+            else:
+                lines.append(f"{indent}- {entry['path']} — {entry['title']}")
+        if listing["next_offset"] is not None:
+            lines.append(f"More entries: wiki_tree(path='/', depth=2, offset={listing['next_offset']})")
+        return "\n".join(lines)
+
+    # ── tool dispatch (matches paper tool names) ──────────────────────────
+
+    def execute_tool(self, name: str, arguments: dict) -> str:
+        """Run a single tool call and return a JSON string."""
+        remaining_seconds()
+        if name == "retrieve_evidence":
+            return dumps(self.retrieve_evidence(arguments.get("query", ""),
+                max_pages=arguments.get("max_pages", 2), exclude_paths=arguments.get("exclude_paths"),
+                exclude_summaries=arguments.get("exclude_summaries"), limit=arguments.get("limit"),
+                token_budget=arguments.get("token_budget"), max_operations=arguments.get("max_operations", 2)))
+        if name == "summary_search":
+            return dumps(self.summary_search(arguments.get("query", ""), arguments.get("limit"),
+                                             arguments.get("offset", 0), arguments.get("exclude_paths"),
+                                             arguments.get("token_budget")))
+        if name == "wiki_tree":
+            return json.dumps(self.tree(arguments.get("path", "/"), arguments.get("depth", 2),
+                                        arguments.get("offset", 0), arguments.get("limit", 100)), ensure_ascii=False)
+        if name == "wiki_read":
+            return dumps(self.read(arguments.get("paths") or arguments.get("dirs") or [],
+                                   arguments.get("offset", 0)))
+
+        if name == "source_read":
+            return json.dumps(decorate_article(self.source_read(arguments.get("article", ""),
+                                               arguments.get("start_line", 1),
+                                               arguments.get("end_line"))), ensure_ascii=False)
+
+        return json.dumps({"error": f"unknown tool: {name}"})
+
+
+# ─── OpenAI tool schemas exposed to the agent ─────────────────────────────
+
+WIKI_TOOL_SCHEMAS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "summary_search",
+            "description": "Find current summaries for an unresolved entity or relation, using configured BM25/dense/hybrid retrieval. Returns budgeted summary text and member paths, never final evidence. Rephrase the query for another hop, page with next_offset, or exclude already-read summaries. If summaries miss evidence, use wiki_tree and wiki_read directly.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Specific missing fact/entity; at most 512 tokens"},
+                    "limit": {"type": "integer", "description": "1-10 summaries; default configured limit (5)"},
+                    "offset": {"type": "integer", "description": "Candidate offset from previous next_offset; same query and exclusions"},
+                    "exclude_paths": {"type": "array", "items": {"type": "string"}, "description": "Already-read summary paths; use offset=0 when changing exclusions"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "wiki_tree",
+            "description": "List the Wiki directory tree without relevance scoring. Choose files by title and path, expand a subdirectory, or use next_offset to see more entries. Lists current readable pages only; no content is read.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Wiki-relative directory such as film or sources/articles; default /"},
+                    "depth": {"type": "integer", "description": "Levels below path, 1-10; default 2"},
+                    "offset": {"type": "integer", "description": "Pagination offset, default 0"},
+                    "limit": {"type": "integer", "description": "Max entries, 1-200; default 100"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "wiki_read",
+            "description": (
+                "Read 1-10 pages within the configured token budget. Knowledge pages return evidence IDs for answers. "
+                "Summaries and directories are navigation only and have no evidence IDs. "
+                "Text may be truncated: continue a single path with next_offset (character offset into page body). "
+                "For a directory, prefer wiki_tree pagination."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "offset": {"type": "integer", "description": "Character offset into the page body; use returned next_offset with a single path"},
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "List of paths. Use '/' for the root, 'entities' for a "
+                            "directory index, 'entities/X.md' for a full page."
+                        ),
+                    }
+                },
+                "required": ["paths"],
+            },
+        },
+    },
+]
+
+WIKI_TOOL_SCHEMAS.append({
+    "type": "function",
+    "function": {
+        "name": "source_read",
+        "description": "Optionally read original article lines with evidence IDs for missing details, ambiguity, conflicts, or original-source verification. Knowledge-page evidence is sufficient when it explicitly answers the question.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "article": {"type": "string", "description": "sources/articles/...md path"},
+                "start_line": {"type": "integer", "description": "1-based inclusive start (default 1)"},
+                "end_line": {"type": "integer", "description": "Optional inclusive end; omit to read up to 80 lines. At most 200 lines per call. Ends beyond EOF are clamped; use actual returned line ranges and next_start_line."},
+            },
+            "required": ["article"],
+        },
+    },
+})
+
+WIKI_TOOL_SCHEMAS.append({
+    "type": "function",
+    "function": {
+        "name": "retrieve_evidence",
+        "description": "Find an unresolved entity by an unambiguous title/alias or summary retrieval, then read up to 2 knowledge pages. Returns actual evidence IDs and continuation offsets. Search plus reading costs 2 tool slots; empty navigation costs 1. Use wiki_read to continue already-read pages and cover every compared entity or hop.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Specific unresolved entity or fact; at most 512 tokens"},
+                "max_pages": {"type": "integer", "description": "1-10 knowledge pages, default 2, sharing the read token budget"},
+                "exclude_paths": {"type": "array", "items": {"type": "string"}, "description": "Knowledge pages already read; use wiki_read with next_offset for missing parts"},
+                "exclude_summaries": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["query"],
+        },
+    },
+})

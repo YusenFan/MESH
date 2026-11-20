@@ -50,87 +50,87 @@ LLM 仍决定哪些事实相关、事实措辞、关系含义、摘要表达与�
 
 | 审核点                                                                                                | 为什么改                                            | 怎么做                                                                                                         |
 | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| [ ] [wiki_path](llm_wiki_bench/wiki_documents.py:16)         | 模型路径必须准确指向 wiki 内的文件。                | 拒绝绝对路径、目录穿越、重复分隔符和逃出目录的符号链接。                                                       |
-| [ ] [parse_document](llm_wiki_bench/wiki_documents.py:29)    | tags、别名可能带逗号；字符串拆分会误读。            | 统一用 YAML 解析 frontmatter，并要求对象结构。                                                                 |
-| [ ] [render_document](llm_wiki_bench/wiki_documents.py:40)   | 页面格式不应依赖模型输出是否规范。                  | Python 序列化 YAML，并统一正文换行。                                                                           |
-| [ ] [write_document](llm_wiki_bench/wiki_documents.py:44)    | 读取者不应看到写了一半的页面。                      | 先写同目录临时文件，再原子替换单个文件；不声称批次级事务。                                                     |
-| [ ] [archive_article](llm_wiki_bench/wiki_documents.py:52)   | 引用需要确定的 article 内容，不能依赖会碰撞的标题。 | 原样复制处理后的 article 字节，以完整 SHA-256 命名；内容改变生成另一份 article。                               |
-| [ ] [read_article](llm_wiki_bench/wiki_documents.py:70)      | QA 最终证据必须是实际文章片段。                     | 返回文件的 1-based 闭区间行号、完整引用和内容版本；检查哈希命名文件未被改写。                                  |
-| [ ] [validate_citation](llm_wiki_bench/wiki_documents.py:89) | 模型提供的引用不能直接当成原文。                    | Python 重新读取相同行号，逐字比较 quote，并校验可选版本。                                                      |
-| [ ] [citation_link](llm_wiki_bench/wiki_documents.py:102)    | 每条事实要能直接定位 article。                      | 统一生成 `[[sources/articles/<hash>#Lx-Ly]]`。                                                                 |
-| [ ] [knowledge_pages](llm_wiki_bench/wiki_documents.py:107)  | 摘要不得递归参与自己的分组。                        | 只收集知识目录中的 Markdown；排除 article、summary、synthesis、索引与隐藏路径。                                |
-| [ ] [related_pages](llm_wiki_bench/wiki_documents.py:121)    | 普通正文链接和来源链接不等同于可靠的关联。          | 只解析 Related Pages 段落中带简短说明的 wikilink；无说明旧链接不猜测。                                         |
-| [ ] [text_field](llm_wiki_bench/wiki_documents.py:137)       | 内容字段不能意外插入新章节或自行伪造 wikilink。     | 限定为非空单行文本；链接由 Python 生成。                                                                       |
-| [ ] [string_list](llm_wiki_bench/wiki_documents.py:144)      | aliases/tags 必须是稳定可读的列表。                 | 检查字符串列表并保持顺序去重。                                                                                 |
-| [ ] [render_knowledge](llm_wiki_bench/wiki_documents.py:150) | 模型负责提议事实，程序负责保存结构和引用。          | 逐事实校验 article 引用；关联须指向已有页或本批新页且有说明；渲染 Core Facts、Related Pages、Related Sources。 |
+| [ ] [wiki_path](mesh_bench/wiki_documents.py:16)         | 模型路径必须准确指向 wiki 内的文件。                | 拒绝绝对路径、目录穿越、重复分隔符和逃出目录的符号链接。                                                       |
+| [ ] [parse_document](mesh_bench/wiki_documents.py:29)    | tags、别名可能带逗号；字符串拆分会误读。            | 统一用 YAML 解析 frontmatter，并要求对象结构。                                                                 |
+| [ ] [render_document](mesh_bench/wiki_documents.py:40)   | 页面格式不应依赖模型输出是否规范。                  | Python 序列化 YAML，并统一正文换行。                                                                           |
+| [ ] [write_document](mesh_bench/wiki_documents.py:44)    | 读取者不应看到写了一半的页面。                      | 先写同目录临时文件，再原子替换单个文件；不声称批次级事务。                                                     |
+| [ ] [archive_article](mesh_bench/wiki_documents.py:52)   | 引用需要确定的 article 内容，不能依赖会碰撞的标题。 | 原样复制处理后的 article 字节，以完整 SHA-256 命名；内容改变生成另一份 article。                               |
+| [ ] [read_article](mesh_bench/wiki_documents.py:70)      | QA 最终证据必须是实际文章片段。                     | 返回文件的 1-based 闭区间行号、完整引用和内容版本；检查哈希命名文件未被改写。                                  |
+| [ ] [validate_citation](mesh_bench/wiki_documents.py:89) | 模型提供的引用不能直接当成原文。                    | Python 重新读取相同行号，逐字比较 quote，并校验可选版本。                                                      |
+| [ ] [citation_link](mesh_bench/wiki_documents.py:102)    | 每条事实要能直接定位 article。                      | 统一生成 `[[sources/articles/<hash>#Lx-Ly]]`。                                                                 |
+| [ ] [knowledge_pages](mesh_bench/wiki_documents.py:107)  | 摘要不得递归参与自己的分组。                        | 只收集知识目录中的 Markdown；排除 article、summary、synthesis、索引与隐藏路径。                                |
+| [ ] [related_pages](mesh_bench/wiki_documents.py:121)    | 普通正文链接和来源链接不等同于可靠的关联。          | 只解析 Related Pages 段落中带简短说明的 wikilink；无说明旧链接不猜测。                                         |
+| [ ] [text_field](mesh_bench/wiki_documents.py:137)       | 内容字段不能意外插入新章节或自行伪造 wikilink。     | 限定为非空单行文本；链接由 Python 生成。                                                                       |
+| [ ] [string_list](mesh_bench/wiki_documents.py:144)      | aliases/tags 必须是稳定可读的列表。                 | 检查字符串列表并保持顺序去重。                                                                                 |
+| [ ] [render_knowledge](mesh_bench/wiki_documents.py:150) | 模型负责提议事实，程序负责保存结构和引用。          | 逐事实校验 article 引用；关联须指向已有页或本批新页且有说明；渲染 Core Facts、Related Pages、Related Sources。 |
 
 ### bench_ingest.py
 
 | 审核点                                                                                               | 为什么改                                                 | 怎么做                                                                                                                  |
 | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| [ ] [load_cache](llm_wiki_bench/bench_ingest.py:46)         | 需要复用成功构建。                                       | 读取现有 JSON 缓存，缺失时使用空映射。                                                                                  |
-| [ ] [save_cache](llm_wiki_bench/bench_ingest.py:52)         | 缓存也不应出现半写文件。                                 | 复用原子写入函数保存 JSON。                                                                                             |
-| [ ] [_cache_valid](llm_wiki_bench/bench_ingest.py:57)       | 旧 digest 缓存不代表新结构完成；共享页可以继续增加事实。 | 要求新 schema、归档内容正确、输出页存在且仍含 article 引用；不要求整页哈希永久不变。                                    |
-| [ ] [_article_context](llm_wiki_bench/bench_ingest.py:75)   | 模型需要可核对的引用坐标。                               | 仅在提示里添加行号，归档文件保持不变。                                                                                  |
-| [ ] [_existing_evidence](llm_wiki_bench/bench_ingest.py:80) | 更新知识页时，旧引用仍需有原文可核对。                   | 收集被选知识页的 article 引用，读出这些文章并提供给生成调用。                                                           |
-| [ ] [_ingest_batch_one](llm_wiki_bench/bench_ingest.py:92)  | 不能把自由 Markdown、空输出或部分覆盖直接标为成功。      | 保留“选页→生成”两次调用；提供 purpose、目录、已读页面和 article；完整检查输出、来源覆盖与关联目标后写页，再写成功缓存。 |
-| [ ] [rebuild_indexes](llm_wiki_bench/bench_ingest.py:165)   | 索引只是导航，不需要另一轮模型事实生成。                 | 按实际知识页确定性地生成目录索引与根索引。                                                                              |
-| [ ] [ingest_batch](llm_wiki_bench/bench_ingest.py:180)      | 单篇和多篇应使用同一个证据合同，失败必须能重试。         | 统一批次处理，失败计数并保留错误；知识页阶段结束后生成摘要，即使本轮知识页均缓存命中也继续未完成摘要。                  |
-| [ ] [main](llm_wiki_bench/bench_ingest.py:213)              | 旧 CLI 应继续可用，并允许隔离重建。                      | 保留 dataset/limit/batch-size/force；新增 wiki-dir，使用 config.RAW_DIR，失败返回非零退出码。                           |
+| [ ] [load_cache](mesh_bench/bench_ingest.py:46)         | 需要复用成功构建。                                       | 读取现有 JSON 缓存，缺失时使用空映射。                                                                                  |
+| [ ] [save_cache](mesh_bench/bench_ingest.py:52)         | 缓存也不应出现半写文件。                                 | 复用原子写入函数保存 JSON。                                                                                             |
+| [ ] [_cache_valid](mesh_bench/bench_ingest.py:57)       | 旧 digest 缓存不代表新结构完成；共享页可以继续增加事实。 | 要求新 schema、归档内容正确、输出页存在且仍含 article 引用；不要求整页哈希永久不变。                                    |
+| [ ] [_article_context](mesh_bench/bench_ingest.py:75)   | 模型需要可核对的引用坐标。                               | 仅在提示里添加行号，归档文件保持不变。                                                                                  |
+| [ ] [_existing_evidence](mesh_bench/bench_ingest.py:80) | 更新知识页时，旧引用仍需有原文可核对。                   | 收集被选知识页的 article 引用，读出这些文章并提供给生成调用。                                                           |
+| [ ] [_ingest_batch_one](mesh_bench/bench_ingest.py:92)  | 不能把自由 Markdown、空输出或部分覆盖直接标为成功。      | 保留“选页→生成”两次调用；提供 purpose、目录、已读页面和 article；完整检查输出、来源覆盖与关联目标后写页，再写成功缓存。 |
+| [ ] [rebuild_indexes](mesh_bench/bench_ingest.py:165)   | 索引只是导航，不需要另一轮模型事实生成。                 | 按实际知识页确定性地生成目录索引与根索引。                                                                              |
+| [ ] [ingest_batch](mesh_bench/bench_ingest.py:180)      | 单篇和多篇应使用同一个证据合同，失败必须能重试。         | 统一批次处理，失败计数并保留错误；知识页阶段结束后生成摘要，即使本轮知识页均缓存命中也继续未完成摘要。                  |
+| [ ] [main](mesh_bench/bench_ingest.py:213)              | 旧 CLI 应继续可用，并允许隔离重建。                      | 保留 dataset/limit/batch-size/force；新增 wiki-dir，使用 config.RAW_DIR，失败返回非零退出码。                           |
 
 ### build_summaries.py
 
 | 审核点                                                                                                 | 为什么改                                                   | 怎么做                                                                                                         |
 | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| [ ] [summary_groups](llm_wiki_bench/build_summaries.py:16)    | 严格实现已确认的集合规则，避免语义合并或连通分量扩大主题。 | 自身加有效 Related Pages；去单例、同集合和严格子集；重叠但不包含者保留。                                       |
-| [ ] [summary_path](llm_wiki_bench/build_summaries.py:27)      | 同一组从不同知识页发现应复用同一摘要。                     | 排序去重后的成员路径生成完整 SHA-256 文件名。                                                                  |
-| [ ] [group_fingerprint](llm_wiki_bench/build_summaries.py:33) | 重复运行时应复用内容未变的摘要。                           | 对成员路径与全文计算指纹；只是缓存有效性检查，不构建版本历史系统。                                             |
-| [ ] [current_summaries](llm_wiki_bench/build_summaries.py:38) | 旧缓存和已被大集合包含的摘要不能继续作为当前导航。         | 只接受当前候选组且成员、schema、内容指纹一致的摘要；过期文件不删除。                                           |
-| [ ] [build_summaries](llm_wiki_bench/build_summaries.py:66)   | 模型只需概括固定成员，不能决定去重或偷偷改组。             | 把全部成员提供给模型，校验输出字段，Python 写 members 与链接；失败不记录成功缓存，下一次自动重试；支持 limit。 |
-| [ ] [main](llm_wiki_bench/build_summaries.py:118)             | 分组可以先审核，摘要可以独立续跑。                         | 提供 wiki-dir、limit、force 和无调用/无写入的 dry-run。                                                        |
+| [ ] [summary_groups](mesh_bench/build_summaries.py:16)    | 严格实现已确认的集合规则，避免语义合并或连通分量扩大主题。 | 自身加有效 Related Pages；去单例、同集合和严格子集；重叠但不包含者保留。                                       |
+| [ ] [summary_path](mesh_bench/build_summaries.py:27)      | 同一组从不同知识页发现应复用同一摘要。                     | 排序去重后的成员路径生成完整 SHA-256 文件名。                                                                  |
+| [ ] [group_fingerprint](mesh_bench/build_summaries.py:33) | 重复运行时应复用内容未变的摘要。                           | 对成员路径与全文计算指纹；只是缓存有效性检查，不构建版本历史系统。                                             |
+| [ ] [current_summaries](mesh_bench/build_summaries.py:38) | 旧缓存和已被大集合包含的摘要不能继续作为当前导航。         | 只接受当前候选组且成员、schema、内容指纹一致的摘要；过期文件不删除。                                           |
+| [ ] [build_summaries](mesh_bench/build_summaries.py:66)   | 模型只需概括固定成员，不能决定去重或偷偷改组。             | 把全部成员提供给模型，校验输出字段，Python 写 members 与链接；失败不记录成功缓存，下一次自动重试；支持 limit。 |
+| [ ] [main](mesh_bench/build_summaries.py:118)             | 分组可以先审核，摘要可以独立续跑。                         | 提供 wiki-dir、limit、force 和无调用/无写入的 dry-run。                                                        |
 
 ### wiki_retriever.py
 
 | 审核点                                                                                            | 为什么改                                             | 怎么做                                                                                    |
 | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| [ ] [layer](llm_wiki_bench/wiki_retriever.py:41)         | 检索时必须区分导航层和证据层。                       | 根据目录把页面分类为 summaries、knowledge、articles。                                     |
-| [ ] [load](llm_wiki_bench/wiki_retriever.py:81)          | 旧 digest 与过期摘要不应继续占据检索结果。           | 排除 digest、synthesis、隐藏文件；摘要通过当前成员校验；其他索引与 BM25 继续沿用。        |
-| [ ] [_parse_page](llm_wiki_bench/wiki_retriever.py:136)  | 新 YAML 列表由序列化器生成；article 文件名是哈希。   | 共用 YAML 解析器读取 tags/aliases；article 用原文件 title/source_title 作为检索显示名称。 |
-| [ ] [search](llm_wiki_bench/wiki_retriever.py:214)       | 摘要优先不能使孤立知识页或未打标签的页消失。         | 增加 layer 选择和 tags 加分；tags 不过滤；默认 all 保留全部通路，既有评分算法不变。       |
-| [ ] [read](llm_wiki_bench/wiki_retriever.py:314)         | 知识页与摘要链接需要直接可跟随，读导航不等于读证据。 | 支持无扩展名 wikilink 与索引；article 返回行数和 source_read 提示，不加入最终证据。       |
-| [ ] [source_read](llm_wiki_bench/wiki_retriever.py:375)  | 需要显式记录 QA 看过的文章范围。                     | 只允许已载入 article，默认 80 行，最多 200 行；调用统一原文读取函数。                     |
-| [ ] [execute_tool](llm_wiki_bench/wiki_retriever.py:409) | 模型可调用参数必须与实际检索行为一致。               | 传递 layer/tags，结果标记 layer，增加 source_read 分发。                                  |
+| [ ] [layer](mesh_bench/wiki_retriever.py:41)         | 检索时必须区分导航层和证据层。                       | 根据目录把页面分类为 summaries、knowledge、articles。                                     |
+| [ ] [load](mesh_bench/wiki_retriever.py:81)          | 旧 digest 与过期摘要不应继续占据检索结果。           | 排除 digest、synthesis、隐藏文件；摘要通过当前成员校验；其他索引与 BM25 继续沿用。        |
+| [ ] [_parse_page](mesh_bench/wiki_retriever.py:136)  | 新 YAML 列表由序列化器生成；article 文件名是哈希。   | 共用 YAML 解析器读取 tags/aliases；article 用原文件 title/source_title 作为检索显示名称。 |
+| [ ] [search](mesh_bench/wiki_retriever.py:214)       | 摘要优先不能使孤立知识页或未打标签的页消失。         | 增加 layer 选择和 tags 加分；tags 不过滤；默认 all 保留全部通路，既有评分算法不变。       |
+| [ ] [read](mesh_bench/wiki_retriever.py:314)         | 知识页与摘要链接需要直接可跟随，读导航不等于读证据。 | 支持无扩展名 wikilink 与索引；article 返回行数和 source_read 提示，不加入最终证据。       |
+| [ ] [source_read](mesh_bench/wiki_retriever.py:375)  | 需要显式记录 QA 看过的文章范围。                     | 只允许已载入 article，默认 80 行，最多 200 行；调用统一原文读取函数。                     |
+| [ ] [execute_tool](mesh_bench/wiki_retriever.py:409) | 模型可调用参数必须与实际检索行为一致。               | 传递 layer/tags，结果标记 layer，增加 source_read 分发。                                  |
 
 ### wiki_agent.py
 
 | 审核点                                                                                        | 为什么改                                        | 怎么做                                                                                          |
 | --------------------------------------------------------------------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| [ ] [retrieve](llm_wiki_bench/wiki_agent.py:94)      | 逐级导航和直接访问都应由同一个检索 Agent 决定。 | 提示摘要优先但允许直达；缺少 article 阅读时提醒；删除超预算自动读页和按问题措辞猜测跳数的回退。 |
-| [ ] [_execute_one](llm_wiki_bench/wiki_agent.py:166) | 每次读证据都要可追踪，坏参数不应伪装成成功。    | 规范调用参数，把验证错误作为工具结果；记录 source_read 返回的实际片段与版本；所有调用计入预算。 |
+| [ ] [retrieve](mesh_bench/wiki_agent.py:94)      | 逐级导航和直接访问都应由同一个检索 Agent 决定。 | 提示摘要优先但允许直达；缺少 article 阅读时提醒；删除超预算自动读页和按问题措辞猜测跳数的回退。 |
+| [ ] [_execute_one](mesh_bench/wiki_agent.py:166) | 每次读证据都要可追踪，坏参数不应伪装成成功。    | 规范调用参数，把验证错误作为工具结果；记录 source_read 返回的实际片段与版本；所有调用计入预算。 |
 
 ### run_qa.py
 
 | 审核点                                                                                      | 为什么改                                       | 怎么做                                                                                                                                                                  |
 | ------------------------------------------------------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [ ] [validate_answer](llm_wiki_bench/run_qa.py:50) | 输出证据链不能引用没读过的原文或错版本。       | 每个提交的 hop 必须有 claim 和 citations；校验路径、版本、已读范围内的子区间和完整 quote；仅声明 citations_validated。                                                  |
-| [ ] [_answer](llm_wiki_bench/run_qa.py:89)         | 旧提示允许自身知识补全，与完整证据链目标冲突。 | 只把实际 article 片段交给答案调用，返回结构化短答案及各跳引用；没有片段时直接 unknown。                                                                                 |
-| [ ] [main](llm_wiki_bench/run_qa.py:104)           | 审核答案需要同时看到引用、读取轨迹和错误。     | 增加 wiki-dir；无 article 的旧 wiki 在调用模型前报错；预测 JSONL 写 article_evidence/evidence_chain/evidence_status/error；验证失败写 unknown，并保留已获得的检索轨迹。 |
+| [ ] [validate_answer](mesh_bench/run_qa.py:50) | 输出证据链不能引用没读过的原文或错版本。       | 每个提交的 hop 必须有 claim 和 citations；校验路径、版本、已读范围内的子区间和完整 quote；仅声明 citations_validated。                                                  |
+| [ ] [_answer](mesh_bench/run_qa.py:89)         | 旧提示允许自身知识补全，与完整证据链目标冲突。 | 只把实际 article 片段交给答案调用，返回结构化短答案及各跳引用；没有片段时直接 unknown。                                                                                 |
+| [ ] [main](mesh_bench/run_qa.py:104)           | 审核答案需要同时看到引用、读取轨迹和错误。     | 增加 wiki-dir；无 article 的旧 wiki 在调用模型前报错；预测 JSONL 写 article_evidence/evidence_chain/evidence_status/error；验证失败写 unknown，并保留已获得的检索轨迹。 |
 
 ### bench_config.py
 
 | 审核点                                                                                                  | 为什么改                                 | 怎么做                                                                                              |
 | ------------------------------------------------------------------------------------------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| [ ] [set_dataset](llm_wiki_bench/bench_config.py:128)          | 重建不应要求覆盖旧 corpus 或共享旧缓存。 | 新增可选 wiki_dir；指定时缓存位于该 wiki 的 .build-cache.json，输入 article 路径仍按 dataset 选择。 |
-| [ ] [get_dir_catalog_text](llm_wiki_bench/bench_config.py:272) | 新来源目录不再包含 digest。              | 来源计数只统计 articles。                                                                           |
-| [ ] [auto_init_page_types](llm_wiki_bench/bench_config.py:448) | LLM 不能把 summaries 当成普通知识类型。  | 提示及 Python 校验保留 sources/summaries/syntheses；自动类型名限小写字母。                          |
+| [ ] [set_dataset](mesh_bench/bench_config.py:128)          | 重建不应要求覆盖旧 corpus 或共享旧缓存。 | 新增可选 wiki_dir；指定时缓存位于该 wiki 的 .build-cache.json，输入 article 路径仍按 dataset 选择。 |
+| [ ] [get_dir_catalog_text](mesh_bench/bench_config.py:272) | 新来源目录不再包含 digest。              | 来源计数只统计 articles。                                                                           |
+| [ ] [auto_init_page_types](mesh_bench/bench_config.py:448) | LLM 不能把 summaries 当成普通知识类型。  | 提示及 Python 校验保留 sources/summaries/syntheses；自动类型名限小写字母。                          |
 
 ### run.py
 
 | 审核点                                                                               | 为什么改                             | 怎么做                                                |
 | ------------------------------------------------------------------------------------ | ------------------------------------ | ----------------------------------------------------- |
-| [ ] [step_ingest](llm_wiki_bench/run.py:80) | 构建失败不能仍向流水线返回成功。     | 传递独立 wiki_dir，并根据知识页与摘要失败数返回状态。 |
-| [ ] [run_one](llm_wiki_bench/run.py:110)    | 独立输出配置必须实际到达 ingestion。 | 向 step_ingest 传递 wiki_dir。                        |
-| [ ] [main](llm_wiki_bench/run.py:128)       | 完整流水线也要支持隔离重建。         | 新增 wiki-dir；禁止 --all 写入同一个自定义目录。      |
+| [ ] [step_ingest](mesh_bench/run.py:80) | 构建失败不能仍向流水线返回成功。     | 传递独立 wiki_dir，并根据知识页与摘要失败数返回状态。 |
+| [ ] [run_one](mesh_bench/run.py:110)    | 独立输出配置必须实际到达 ingestion。 | 向 step_ingest 传递 wiki_dir。                        |
+| [ ] [main](mesh_bench/run.py:128)       | 完整流水线也要支持隔离重建。         | 新增 wiki-dir；禁止 --all 写入同一个自定义目录。      |
 
 ## 函数之外的改动
 
@@ -151,7 +151,7 @@ LLM 仍决定哪些事实相关、事实措辞、关系含义、摘要表达与�
 
 **同时退出默认 ingestion 的旧行为**包括模型自动合并/移动目录、alias 合并、自动全局 overview、矛盾扫描与补写章节。这些不是“仍在暗中运行”。此次没有实现替代性的自动纠错/目录治理服务。下表逐个列出原入口及去向，方便你决定是否需要单独恢复某项功能。
 
-删除前版本是任务开始时的 `HEAD`（`d0fd9f4`）；可以用 `git show d0fd9f4:llm_wiki_bench/bench_ingest.py` 对照原代码。
+删除前版本是任务开始时的 `HEAD`（`d0fd9f4`）；可以用 `git show d0fd9f4:mesh_bench/bench_ingest.py` 对照原代码。
 
 | 原函数（删除前行号）                               | 替代方式 / 删除原因                                                                                |
 | -------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -252,19 +252,19 @@ QA 侧还删除 `_format_context`、`_extract_clean_answer`：不再把全部导
 .venv/bin/python -m unittest discover -s tests -v
 
 # 构建小样本：调用配置中的 LLM；20 是 article 数量
-.venv/bin/python -m llm_wiki_bench.bench_ingest --dataset hotpotqa --limit 20 \
+.venv/bin/python -m mesh_bench.bench_ingest --dataset hotpotqa --limit 20 \
   --wiki-dir wiki_output/hotpotqa/article-evidence/wiki
 
 # 只看集合，无模型调用、无写入
-.venv/bin/python -m llm_wiki_bench.build_summaries \
+.venv/bin/python -m mesh_bench.build_summaries \
   --wiki-dir wiki_output/hotpotqa/article-evidence/wiki --dry-run
 
 # 独立续跑摘要
-.venv/bin/python -m llm_wiki_bench.build_summaries \
+.venv/bin/python -m mesh_bench.build_summaries \
   --wiki-dir wiki_output/hotpotqa/article-evidence/wiki --limit 10
 
 # 对独立 wiki 做 QA；输出另存，1 是问题数量
-.venv/bin/python -m llm_wiki_bench.run_qa --dataset hotpotqa --limit 1 \
+.venv/bin/python -m mesh_bench.run_qa --dataset hotpotqa --limit 1 \
   --wiki-dir wiki_output/hotpotqa/article-evidence/wiki \
   --output results/hotpotqa/article-evidence-smoke.jsonl
 ```

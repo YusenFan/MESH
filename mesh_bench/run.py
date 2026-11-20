@@ -1,4 +1,4 @@
-"""LLM-Wiki Benchmark — runner.
+"""MESH Benchmark — runner.
 
 Chains the offline wiki-construction pipeline:
 
@@ -9,15 +9,15 @@ Chains the offline wiki-construction pipeline:
 Usage:
 
     # Full pipeline
-    python -m llm_wiki_bench.run --dataset hotpotqa --limit 500
+    python -m mesh_bench.run --dataset hotpotqa --limit 500
 
     # Skip stages
-    python -m llm_wiki_bench.run --dataset hotpotqa --only-download
-    python -m llm_wiki_bench.run --dataset hotpotqa --only-preprocess --limit 500
-    python -m llm_wiki_bench.run --dataset hotpotqa --only-ingest    --limit 500
+    python -m mesh_bench.run --dataset hotpotqa --only-download
+    python -m mesh_bench.run --dataset hotpotqa --only-preprocess --limit 500
+    python -m mesh_bench.run --dataset hotpotqa --only-ingest    --limit 500
 
     # All three datasets
-    python -m llm_wiki_bench.run --all --limit 500
+    python -m mesh_bench.run --all --limit 500
 """
 
 import argparse
@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 
 # Make sibling modules importable when this file is launched directly
-# (e.g. `python release/llm_wiki_bench/run.py ...`).
+# (e.g. `python release/mesh_bench/run.py ...`).
 _BENCH_DIR = Path(__file__).parent
 if str(_BENCH_DIR) not in sys.path:
     sys.path.append(str(_BENCH_DIR))
@@ -142,7 +142,7 @@ def run_one(dataset: str, args) -> bool:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="LLM-Wiki benchmark runner (offline wiki construction)."
+        description="MESH benchmark runner (offline wiki construction)."
     )
     parser.add_argument(
         "--dataset", "-d",

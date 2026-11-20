@@ -19,7 +19,7 @@ from token_budget import dumps
 from wiki_retriever import WikiPage, WikiRetriever
 from request_budget import DeadlineExceeded, remaining_seconds, request_budget, stats_snapshot
 
-_logger = logging.getLogger("llm_wiki.agent")
+_logger = logging.getLogger("mesh.agent")
 
 
 # ─── System prompt ────────────────────────────────────────────────────────

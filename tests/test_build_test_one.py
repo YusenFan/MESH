@@ -13,7 +13,7 @@ class TestBuildOne(unittest.TestCase):
     def test_one_question_uses_ten_articles_and_keeps_initialization(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            dataset = root / 'llm_wiki_bench/datasets/hotpotqa/hotpot_dev_distractor_v1.json'
+            dataset = root / 'mesh_bench/datasets/hotpotqa/hotpot_dev_distractor_v1.json'
             dataset.parent.mkdir(parents=True)
             dataset.write_text(json.dumps([
                 {'_id': 'one', 'question': 'Q1?', 'answer': 'A',
@@ -43,7 +43,7 @@ class TestBuildOne(unittest.TestCase):
     def test_failure_report_is_written_before_nonzero_exit(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            dataset = root / 'llm_wiki_bench/datasets/hotpotqa/hotpot_dev_distractor_v1.json'
+            dataset = root / 'mesh_bench/datasets/hotpotqa/hotpot_dev_distractor_v1.json'
             dataset.parent.mkdir(parents=True)
             dataset.write_text(json.dumps([{'_id': 'one', 'question': 'Q?', 'answer': 'A',
                                            'context': [['Article', ['Article text.']]]}]))

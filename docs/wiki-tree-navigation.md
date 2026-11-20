@@ -40,7 +40,7 @@ summaries/ed-wood-and-ed-wood-film.md — Ed Wood and Ed Wood (film)
 ## 已有摘要离线迁移
 
 ```bash
-python -m llm_wiki_bench.build_summaries \
+python -m mesh_bench.build_summaries \
   --wiki-dir wiki_output/hotpotqa/test-one/wiki \
   --rename-existing
 ```

@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-import llm_wiki_bench  # establish the project's sibling-module import path
+import mesh_bench  # establish the project's sibling-module import path
 import bench_config as config
 import bench_ingest
 from build_summaries import build_summaries, current_summaries, summary_groups, summary_path

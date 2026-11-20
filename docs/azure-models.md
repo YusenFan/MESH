@@ -79,4 +79,4 @@ python -m unittest discover -s tests -p test_azure_models.py -v
 ```
 
 Retrieval tests also need cached tiktoken vocabularies. The local cache used for
-validation is `/private/tmp/llm-wiki-tiktoken`.
+validation is `/private/tmp/mesh-tiktoken`.

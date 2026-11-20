@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-import llm_wiki_bench
+import mesh_bench
 import llm_client
 import run_qa
 from build_summaries import build_summaries

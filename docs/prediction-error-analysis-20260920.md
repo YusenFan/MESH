@@ -5,7 +5,7 @@
 主分析对象：`wiki_output/hotpotqa/first-500/predictions.jsonl`，标准答案：`data/hotpotqa/qa_pairs.jsonl`。分析完全离线，使用预测时保存的证据和轨迹，没有调用模型、修改预测或重跑 QA。以下事实判断均基于本地快照，未进行外部事实核验。
 
 ```bash
-python3 -m llm_wiki_bench.analyze_predictions \
+python3 -m mesh_bench.analyze_predictions \
   --predictions wiki_output/hotpotqa/first-500/predictions.jsonl \
   --qa-pairs data/hotpotqa/qa_pairs.jsonl \
   --output-dir results/hotpotqa/error_analysis

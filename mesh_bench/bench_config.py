@@ -1,4 +1,4 @@
-"""Benchmark configuration for LLM-Wiki.
+"""Benchmark configuration for MESH.
 
 Manages dataset paths, LLM model selection, and wiki directory structure
 for HotpotQA / MuSiQue / 2WikiMultiHopQA. All credentials are read from

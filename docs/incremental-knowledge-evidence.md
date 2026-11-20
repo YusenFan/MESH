@@ -33,7 +33,7 @@
 
 ```bash
 source .venv/bin/activate
-python -m llm_wiki_bench.build_summaries \
+python -m mesh_bench.build_summaries \
   --wiki-dir wiki_output/hotpotqa/test-ten/wiki \
   --singletons-only
 ```

@@ -42,7 +42,7 @@ source .venv/bin/activate
 set -a
 source .env
 set +a
-python -m llm_wiki_bench.run_qa \
+python -m mesh_bench.run_qa \
   --dataset hotpotqa \
   --wiki-dir wiki_output/hotpotqa/test-one/wiki \
   --limit 1 \

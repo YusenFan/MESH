@@ -4,8 +4,8 @@
 
 **核对范围与可比性**
 
-- 当前本地 commit：`e223ab8`。VM 没有 Git 历史；两端 `llm_wiki_bench/*.py` 共 20 个文件 SHA-256 完全一致。
-- VM 预测：`/home/azureuser/LLM-Wiki/results/hotpotqa/qa-20260918-005513/predictions.jsonl`；运行日志同目录 `qa.log`。
+- 当前本地 commit：`e223ab8`。VM 没有 Git 历史；两端 `mesh_bench/*.py` 共 20 个文件 SHA-256 完全一致。
+- VM 预测：`/home/azureuser/MESH/results/hotpotqa/qa-20260918-005513/predictions.jsonl`；运行日志同目录 `qa.log`。
 - VM Wiki：`wiki_output/hotpotqa/first-100/wiki`；小 Wiki 与预测：本地 `wiki_output/hotpotqa/test-ten/`。
 - 前 10 题 id/question/answer 的 SHA-256 完全一致：`ebc556a90dab0afcdc8d8d51561abc7a07d8d53d54a3b6bca97cac8d0376cb72`。
 - 两份预测记录均显示 QA 模型 `gpt-4o`、hybrid summary 检索、limit=5、candidates=20、token_budget=4000，实际 hybrid 未降级。VM 日志确认 T_max=15。
@@ -26,7 +26,7 @@
 
 **1. [P1] 更新知识页会删除旧事实和来源；最终建库成功统计掩盖覆盖损失**
 
-位置：[bench_ingest.py:100](../llm_wiki_bench/bench_ingest.py#L100)、[bench_ingest.py:125](../llm_wiki_bench/bench_ingest.py#L125)、[bench_ingest.py:212](../llm_wiki_bench/bench_ingest.py#L212)。
+位置：[bench_ingest.py:100](../mesh_bench/bench_ingest.py#L100)、[bench_ingest.py:125](../mesh_bench/bench_ingest.py#L125)、[bench_ingest.py:212](../mesh_bench/bench_ingest.py#L212)。
 
 调用链：`_ingest_batch_one → _validate_proposal → render_knowledge → write_document`。验证器只强制本批输入文章出现于输出；对选中的旧页面，没有强制保留它已有的文章覆盖或事实。然后整页替换。prompt 中“preserve existing supported facts and citations”没有对应的代码约束。
 
@@ -45,7 +45,7 @@ VM 实证：
 
 **2. [P1] Summary 是唯一有排序的搜索入口，绝大多数知识页没有直接检索机会**
 
-位置：[summary_retrieval.py:69](../llm_wiki_bench/summary_retrieval.py#L69)、[build_summaries.py:17](../llm_wiki_bench/build_summaries.py#L17)、[wiki_retriever.py:136](../llm_wiki_bench/wiki_retriever.py#L136)。
+位置：[summary_retrieval.py:69](../mesh_bench/summary_retrieval.py#L69)、[build_summaries.py:17](../mesh_bench/build_summaries.py#L17)、[wiki_retriever.py:136](../mesh_bench/wiki_retriever.py#L136)。
 
 `SummaryIndex`明确跳过所有非 summary 页面；summary 组又要求至少两个 Related Pages 成员。当前 QA 工具只有 summary_search、wiki_tree、wiki_read、source_read，没有知识页标题/别名/事实搜索。
 
@@ -67,7 +67,7 @@ VM 实证：
 
 **3. [P1] 引文错误反馈与重试机制不能有效纠正，正确候选被丢为 unknown**
 
-位置：[qa_contract.py:35](../llm_wiki_bench/qa_contract.py#L35)、[wiki_agent.py:154](../llm_wiki_bench/wiki_agent.py#L154)、[wiki_agent.py:246](../llm_wiki_bench/wiki_agent.py#L246)。
+位置：[qa_contract.py:35](../mesh_bench/qa_contract.py#L35)、[wiki_agent.py:154](../mesh_bench/wiki_agent.py#L154)、[wiki_agent.py:246](../mesh_bench/wiki_agent.py#L246)。
 
 当前严格匹配是合理的出处约束；问题是模型必须自行重复一段完整引文，而知识页错误只返回泛化字符串，没有指出具体 page/quote/字段/可用文本。相同错误 proposal 没有去重或升级修复。每次失败仍消耗工具预算。
 
@@ -81,7 +81,7 @@ VM 实证：
 
 **4. [P1] 导航关系未经来源验证，却可以当成正式知识证据**
 
-位置：[wiki_documents.py:196](../llm_wiki_bench/wiki_documents.py#L196)、[wiki_agent.py:272](../llm_wiki_bench/wiki_agent.py#L272)、[qa_contract.py:39](../llm_wiki_bench/qa_contract.py#L39)。
+位置：[wiki_documents.py:196](../mesh_bench/wiki_documents.py#L196)、[wiki_agent.py:272](../mesh_bench/wiki_agent.py#L272)、[qa_contract.py:39](../mesh_bench/qa_contract.py#L39)。
 
 Related Pages 的 reason 仅验证非空文本及目标页存在，不需要来源引用；description 同样没有事实级来源约束。QA 把整个知识页 body 收为 page_evidence，只要 quote 是子串就接受，无法区分 Core Facts、description、关系理由。
 
@@ -91,7 +91,7 @@ Related Pages 的 reason 仅验证非空文本及目标页存在，不需要来�
 
 **5. [P2] 工具参数容易造成可避免的失败并消耗预算**
 
-位置：[wiki_retriever.py:187](../llm_wiki_bench/wiki_retriever.py#L187)、[wiki_retriever.py:299](../llm_wiki_bench/wiki_retriever.py#L299)、[wiki_documents.py:102](../llm_wiki_bench/wiki_documents.py#L102)。
+位置：[wiki_retriever.py:187](../mesh_bench/wiki_retriever.py#L187)、[wiki_retriever.py:299](../mesh_bench/wiki_retriever.py#L299)、[wiki_documents.py:102](../mesh_bench/wiki_documents.py#L102)。
 
 - 40 次虚拟 Wiki 目录格式错误；其中 `/entities` 36 次。根路径用 `/`，子路径却必须没有开头斜线。另 4 次目录确实不存在。共有 35 道题发生 tree 错误。
 - 19 次 source_read 行范围错误，涉及 17 题；典型是请求 1–20 行，而文章只有 11 行（16 次）。API 返回错误而不是已有段落。
@@ -101,7 +101,7 @@ Related Pages 的 reason 仅验证非空文本及目标页存在，不需要来�
 
 **6. [P2] 评估字段过时、输出目录共享、缺失预测分母错误**
 
-位置：[evaluate.py:116](../llm_wiki_bench/evaluate.py#L116)、[evaluate.py:137](../llm_wiki_bench/evaluate.py#L137)、[run_qa.py:151](../llm_wiki_bench/run_qa.py#L151)、[run_qa.py:184](../llm_wiki_bench/run_qa.py#L184)。
+位置：[evaluate.py:116](../mesh_bench/evaluate.py#L116)、[evaluate.py:137](../mesh_bench/evaluate.py#L137)、[run_qa.py:151](../mesh_bench/run_qa.py#L151)、[run_qa.py:184](../mesh_bench/run_qa.py#L184)。
 
 - runner 写 retrieval_llm_calls/retrieval_usage_by_model、evidence_chain[*].citations；evaluator 却读 llm_calls/usage_by_model、顶层 citations，造成全 0。
 - 实际 100 题有 866 次成功记录的 QA 模型调用、114 个最终答案引用条目；模型记录总 tokens=13,112,578（不含 embedding，不代表唯一内容量，也未换算费用）。

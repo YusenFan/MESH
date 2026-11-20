@@ -20,16 +20,16 @@
 
 下列文件来自远端另一套已被当前设计替代的接口。其引用使用 `source_id/version_id`、`fact_apply`、`summary_read` 等旧合同，直接并入会导致导入错误或改变已确认的初始化/分组行为。因此本次合并不将它们引入当前树，而非禁用失败测试：
 
-- `llm_wiki_bench/build_agent.py`
-- `llm_wiki_bench/wiki_store.py`
-- `llm_wiki_bench/summary_store.py`
-- `llm_wiki_bench/validate_wiki.py`
-- `llm_wiki_bench/resume_summaries.py`
-- `llm_wiki_bench/retrieval_experiment.py`
+- `mesh_bench/build_agent.py`
+- `mesh_bench/wiki_store.py`
+- `mesh_bench/summary_store.py`
+- `mesh_bench/validate_wiki.py`
+- `mesh_bench/resume_summaries.py`
+- `mesh_bench/retrieval_experiment.py`
 - `tests/test_wiki_tools.py`、`tests/test_summaries.py`（对应旧 API；其中独立的预处理和用量用例已迁移）
 - `WIKI_AGENT_PLAN.md`、`docs/cross-document-summaries.md`、`docs/function-reference.md`、`docs/system-learning-guide.md`、`docs/wiki-agent-acceptance.md`（描述旧接口）
 
-这些内容仍完整存在于远端提交 `e5048d7`，本机另保存到 `/tmp/llm-wiki-merge-review/retired-remote/`。冲突文件双方原文保存到该目录下 `stage-2/` 和 `stage-3/`。
+这些内容仍完整存在于远端提交 `e5048d7`，本机另保存到 `/tmp/mesh-merge-review/retired-remote/`。冲突文件双方原文保存到该目录下 `stage-2/` 和 `stage-3/`。
 
 ## 验证与提交注意
 

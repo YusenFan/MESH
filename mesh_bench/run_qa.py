@@ -1,4 +1,4 @@
-"""End-to-end QA runner over a compiled LLM-Wiki.
+"""End-to-end QA runner over a compiled MESH.
 
 For each QA pair this script
 
@@ -8,8 +8,8 @@ For each QA pair this script
 
 Usage:
 
-    python -m llm_wiki_bench.run_qa --dataset hotpotqa --limit 5
-    python -m llm_wiki_bench.run_qa --dataset hotpotqa --limit 500 --evaluate
+    python -m mesh_bench.run_qa --dataset hotpotqa --limit 5
+    python -m mesh_bench.run_qa --dataset hotpotqa --limit 500 --evaluate
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ from wiki_retriever import WikiRetriever             # noqa: E402
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run Retrieval-as-Reasoning QA over a compiled LLM-Wiki."
+        description="Run Retrieval-as-Reasoning QA over a compiled MESH."
     )
     parser.add_argument("--wiki-dir", type=Path, help="Read an independently rebuilt wiki.")
     parser.add_argument("--dataset", "-d", required=True,
@@ -111,13 +111,13 @@ def main() -> None:
     wiki_dir = Path(config.WIKI_DIR)
     if not wiki_dir.exists():
         sys.exit(f"❌ Compiled wiki not found: {wiki_dir}\n"
-                 f"   Build it first: python -m llm_wiki_bench.run --dataset {args.dataset}")
+                 f"   Build it first: python -m mesh_bench.run --dataset {args.dataset}")
 
     # 2. Load QA pairs.
     qa_path = Path(config.BASE_DIR) / "data" / args.dataset / "qa_pairs.jsonl"
     if not qa_path.exists():
         sys.exit(f"❌ QA pairs not found: {qa_path}\n"
-                 f"   Run: python -m llm_wiki_bench.run --dataset {args.dataset} --only-preprocess")
+                 f"   Run: python -m mesh_bench.run --dataset {args.dataset} --only-preprocess")
     with open(qa_path, encoding="utf-8") as f:
         qa_pairs = [json.loads(line) for line in f if line.strip()]
     if args.limit:

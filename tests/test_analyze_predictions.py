@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from llm_wiki_bench.analyze_predictions import analyze, read_jsonl, write_outputs
+from mesh_bench.analyze_predictions import analyze, read_jsonl, write_outputs
 
 
 class PredictionAnalysisTests(unittest.TestCase):

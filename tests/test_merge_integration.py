@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import llm_wiki_bench
+import mesh_bench
 from preprocess_bench import process_hotpotqa, process_musique, process_2wikimhqa
 from wiki_agent import WikiAgent
 from wiki_retriever import WikiRetriever

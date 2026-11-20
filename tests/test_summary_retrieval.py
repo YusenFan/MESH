@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-import llm_wiki_bench
+import mesh_bench
 from build_summaries import build_summaries
 from embedding_client import EmbeddingClient
 from summary_retrieval import BM25, fuse

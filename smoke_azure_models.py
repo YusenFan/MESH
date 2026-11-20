@@ -44,7 +44,7 @@ def preflight(scope="full"):
 
 
 def run_checks(root: Path, record, scope="full"):
-    import llm_wiki_bench  # Adds sibling modules to sys.path.
+    import mesh_bench  # Adds sibling modules to sys.path.
     import bench_config as config
     from llm_client import call_llm, call_llm_json, call_llm_with_tools
     from embedding_client import EmbeddingClient

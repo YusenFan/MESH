@@ -61,7 +61,7 @@ def append_build_metrics(wiki_dir: Path, dataset: str, article_count: int,
     attempts.append(attempt)
     by_model = _merge_usage(*(item.get("llm_usage_by_model", {}) for item in attempts))
     report = {
-        "schema": "llm-wiki-build-metrics-v1",
+        "schema": "mesh-build-metrics-v1",
         "dataset": dataset,
         "wiki_dir": str(Path(wiki_dir).resolve()),
         "article_count": article_count,

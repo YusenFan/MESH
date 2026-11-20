@@ -45,16 +45,16 @@ LLM 与 embedding 使用分别持久化的 HTTP Session。latency profile 默认
 构建结束后可用 `run --prepare-retrieval-index`，已有 Wiki 可单独执行：
 
 ```bash
-python -m llm_wiki_bench.prepare_retrieval \
+python -m mesh_bench.prepare_retrieval \
   --dataset hotpotqa --wiki-dir wiki_output/hotpotqa/first-500/wiki
-python -m llm_wiki_bench.prepare_retrieval \
+python -m mesh_bench.prepare_retrieval \
   --dataset 2wikimhqa --wiki-dir wiki_output/2wikimhqa/test-100/wiki
 ```
 
 索引存于 Wiki 的 `.build/summary-index.json` 和带 fingerprint 的二进制向量文件。fingerprint 包括当前摘要检索文本、成员标题、embedding namespace、分块配置和索引版本；校验文件 checksum、维度及单位向量。失效或损坏时重新准备，未变文本的向量继续复用 SQLite embedding 缓存。文件不使用 pickle。首次准备缺失向量仍需要 embedding 服务；离线预建将这部分工作移出在线题目路径。
 
 ```bash
-python -m llm_wiki_bench.run_qa \
+python -m mesh_bench.run_qa \
   --dataset 2wikimhqa --wiki-dir wiki_output/2wikimhqa/test-100/wiki \
   --qa-profile latency --prefetch-pages 2 \
   --read-token-budget 4000 --question-time-budget 120 --evaluate
@@ -76,15 +76,15 @@ JSONL 保留既有字段，并增加 `timings`、`llm_turns`、`network_stats`�
 
 ## 文件与验证
 
-- `llm_wiki_bench/wiki_retriever.py`：摘要入口、目录树、预算内页面阅读和原文工具。
-- `llm_wiki_bench/summary_retrieval.py`：BM25、dense 分块召回、RRF 和候选分页。
-- `llm_wiki_bench/embedding_client.py`：HTTP embeddings、按内容和模型隔离的 SQLite 缓存。
-- `llm_wiki_bench/prepare_retrieval.py`：独立离线索引准备入口。
-- `llm_wiki_bench/request_budget.py`：单题时间预算与请求/重试计时。
-- `llm_wiki_bench/token_budget.py`：token 计数、完整字符边界截断与续读。
-- `llm_wiki_bench/wiki_agent.py`：循环、预算提示、状态合并、答案提交分支。
-- `llm_wiki_bench/qa_contract.py`：工具 schemas 与共享引用校验。
-- `llm_wiki_bench/run_qa.py`：统一入口、模型参数和结果持久化。
+- `mesh_bench/wiki_retriever.py`：摘要入口、目录树、预算内页面阅读和原文工具。
+- `mesh_bench/summary_retrieval.py`：BM25、dense 分块召回、RRF 和候选分页。
+- `mesh_bench/embedding_client.py`：HTTP embeddings、按内容和模型隔离的 SQLite 缓存。
+- `mesh_bench/prepare_retrieval.py`：独立离线索引准备入口。
+- `mesh_bench/request_budget.py`：单题时间预算与请求/重试计时。
+- `mesh_bench/token_budget.py`：token 计数、完整字符边界截断与续读。
+- `mesh_bench/wiki_agent.py`：循环、预算提示、状态合并、答案提交分支。
+- `mesh_bench/qa_contract.py`：工具 schemas 与共享引用校验。
+- `mesh_bench/run_qa.py`：统一入口、模型参数和结果持久化。
 - `tests/test_tree_navigation.py`：树展开、分页、可读标题、摘要重名处理与旧文件迁移。
 - `tests/test_qa_loop.py`：缺口拒绝后补查、引用修复、完整需求覆盖、预算边界、多调用响应、停止行为和 runner 输出。
 - `tests/test_qa_latency.py`：2Wiki/HotpotQA profile 对照、比较题预读、四跳补查、组合成本、索引失效与时间预算。

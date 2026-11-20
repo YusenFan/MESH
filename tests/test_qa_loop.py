@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-import llm_wiki_bench
+import mesh_bench
 from wiki_agent import WikiAgent, RetrievalResult
 from wiki_documents import archive_article, read_article
 from wiki_retriever import WikiRetriever

@@ -1,4 +1,4 @@
-"""LLM-Wiki benchmark package.
+"""MESH benchmark package.
 
 Offline wiki construction pipeline + Retrieval-as-Reasoning agent +
 answer-quality evaluation for multi-hop QA datasets

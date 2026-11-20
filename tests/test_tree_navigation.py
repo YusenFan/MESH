@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
-import llm_wiki_bench
+import mesh_bench
 from build_summaries import build_summaries, current_summaries, migrate_summary_names, summary_path
 from wiki_documents import archive_article, parse_document
 from wiki_retriever import WikiRetriever, WIKI_TOOL_SCHEMAS

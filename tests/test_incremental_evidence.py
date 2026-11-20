@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-import llm_wiki_bench
+import mesh_bench
 import bench_config as config
 import bench_ingest
 from build_summaries import build_summaries, current_summaries

@@ -1,6 +1,6 @@
 """Offline error extraction; uses the repository evaluator without changing scores.
 
-python3 -m llm_wiki_bench.analyze_predictions --predictions PATH --qa-pairs PATH
+python3 -m mesh_bench.analyze_predictions --predictions PATH --qa-pairs PATH
 Diagnostic categories describe observable signals, not proven semantic causes.
 """
 from __future__ import annotations

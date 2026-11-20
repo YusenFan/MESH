@@ -7,7 +7,7 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
-import llm_wiki_bench
+import mesh_bench
 import llm_client
 import model_auth
 from embedding_client import EmbeddingClient

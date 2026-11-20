@@ -8,7 +8,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-import llm_wiki_bench
+import mesh_bench
 import download_datasets as download
 import evaluate as evaluator
 import preprocess_bench as preprocess

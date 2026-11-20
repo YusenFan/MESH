@@ -18,7 +18,7 @@ from token_budget import TokenBudget, dumps
 from wiki_documents import ARTICLE_PREFIX, parse_document, read_article, resolve_wiki_link, wiki_path
 from request_budget import remaining_seconds
 
-_logger = logging.getLogger("llm_wiki.retriever")
+_logger = logging.getLogger("mesh.retriever")
 
 
 # ─── Data structures ──────────────────────────────────────────────────────
